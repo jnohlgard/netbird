@@ -1,7 +1,7 @@
 [Unit]
 Description=Netbird Client (%i)
 Documentation=https://netbird.io/docs
-After=network-online.target syslog.target NetworkManager.service
+After=network-online.target syslog.target NetworkManager.service systemd-networkd.service
 Wants=network-online.target
 
 [Service]
