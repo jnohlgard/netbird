@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -38,6 +39,7 @@ type Config struct {
 	TlsCertFile           string
 	TlsKeyFile            string
 	AuthSecret            string
+	AuthSecretFile        string
 	LogLevel              string
 	LogFile               string
 }
@@ -46,7 +48,7 @@ func (c Config) Validate() error {
 	if c.ExposedAddress == "" {
 		return fmt.Errorf("exposed address is required")
 	}
-	if c.AuthSecret == "" {
+	if c.AuthSecret == "" && c.AuthSecretFile == "" {
 		return fmt.Errorf("auth secret is required")
 	}
 	return nil
@@ -85,10 +87,36 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cobraConfig.TlsCertFile, "tls-cert-file", "c", "", "")
 	rootCmd.PersistentFlags().StringVarP(&cobraConfig.TlsKeyFile, "tls-key-file", "k", "", "")
 	rootCmd.PersistentFlags().StringVarP(&cobraConfig.AuthSecret, "auth-secret", "s", "", "auth secret")
+	rootCmd.PersistentFlags().StringVar(&cobraConfig.AuthSecretFile, "auth-secret-file", "", "read auth secret from file")
+	rootCmd.MarkFlagsMutuallyExclusive("auth-secret", "auth-secret-file")
 	rootCmd.PersistentFlags().StringVar(&cobraConfig.LogLevel, "log-level", "info", "log level")
 	rootCmd.PersistentFlags().StringVar(&cobraConfig.LogFile, "log-file", "console", "log file")
 
 	setFlagsFromEnvVars(rootCmd)
+}
+
+func getHashedSecret() ([]byte, error) {
+	authSecret, err := getAuthSecret()
+	if err != nil {
+		return nil, err
+	}
+	hashedSecret := sha256.Sum256(authSecret)
+	return hashedSecret[:], nil
+}
+
+func getAuthSecret() ([]byte, error) {
+	if cobraConfig.AuthSecretFile != "" && cobraConfig.AuthSecret == "" {
+		return getAuthSecretFromFile(cobraConfig.AuthSecretFile)
+	}
+	return []byte(cobraConfig.AuthSecret), nil
+}
+
+func getAuthSecretFromFile(authSecretPath string) ([]byte, error) {
+	data, err := os.ReadFile(authSecretPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read auth secret file: %v", err)
+	}
+	return bytes.TrimSpace(data), nil
 }
 
 func Execute() error {
@@ -138,8 +166,11 @@ func execute(cmd *cobra.Command, args []string) error {
 	}
 	srvListenerCfg.TLSConfig = tlsConfig
 
-	hashedSecret := sha256.Sum256([]byte(cobraConfig.AuthSecret))
-	authenticator := auth.NewTimedHMACValidator(hashedSecret[:], 24*time.Hour)
+	hashedSecret, err := getHashedSecret()
+	if err != nil {
+		return fmt.Errorf("failed to get hashed auth secret: %s", err)
+	}
+	authenticator := auth.NewTimedHMACValidator(hashedSecret, 24*time.Hour)
 
 	srv, err := server.NewServer(metricsServer.Meter, cobraConfig.ExposedAddress, tlsSupport, authenticator)
 	if err != nil {
