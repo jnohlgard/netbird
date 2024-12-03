@@ -1504,8 +1504,11 @@ func (am *DefaultAccountManager) loadAccount(ctx context.Context, accountID inte
 		}
 		datum, ok := dataMap[user.Id]
 		if !ok {
-			log.WithContext(ctx).Warnf("user %s not found in IDP", user.Id)
-			continue
+			log.WithContext(ctx).Warnf("user %s not listed in IDP, attempting specific user ID query", user.Id)
+			datum, err = am.idpManager.GetUserDataByID(ctx, user.Id, idp.AppMetadata{WTAccountID: accountIDString})
+			if err != nil || datum == nil {
+				continue
+			}
 		}
 		matchedUserData = append(matchedUserData, datum)
 	}
